@@ -1,0 +1,73 @@
+ARG GO_VERSION=1.22.2
+ARG COREDNS_VERSION=1.11.3
+ARG PLUGIN_COREDNS_FILTER_VERSION=0.3.0
+ARG PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION=0.1.0
+
+#===============================================================================
+
+FROM --platform=$BUILDPLATFORM registry.fedoraproject.org/fedora:40 as BUILDER
+
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+    ca-certificates git make
+
+ARG BUILDARCH GO_VERSION
+RUN curl -L -# https://go.dev/dl/go${GO_VERSION}.linux-${BUILDARCH}.tar.gz | \
+    tar -C /usr/local -zx
+ENV PATH /usr/local/go/bin:$PATH
+
+ARG COREDNS_VERSION
+RUN git clone --depth 1 --branch v${COREDNS_VERSION} \
+    https://github.com/coredns/coredns.git /coredns
+
+WORKDIR /coredns
+
+ARG PLUGIN_COREDNS_FILTER_VERSION PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION
+RUN go get \
+    github.com/wranders/coredns-filter@v${PLUGIN_COREDNS_FILTER_VERSION} \
+    github.com/doubleu-labs/coredns-netbox-plugin-dns@v${PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION}
+
+RUN sed -i \
+    -e '/^cache:cache/i filter:github.com/wranders/coredns-filter' \
+    -e '/^cache:cache/a netboxdns:github.com/doubleu-labs/coredns-netbox-plugin-dns' \
+    plugin.cfg
+
+ARG TARGETOS TARGETARCH
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOLANG_VERSION=${GO_VERSION} make
+
+RUN useradd coredns --no-log-init -U -M -s /sbin/nologin
+RUN chown coredns:coredns coredns
+RUN setcap 'cap_net_bind_service=+ep' coredns
+RUN mkdir user && \
+    echo $(grep coredns /etc/group) > user/group && \
+    echo $(grep coredns /etc/passwd) > user/passwd && \
+    chown root:root user/{group,passwd} && \
+    chmod 0644 user/{group,passwd}
+
+#===============================================================================
+
+FROM --platform=$TARGETPLATFORM scratch
+
+ARG COREDNS_VERSION PLUGIN_COREDNS_FILTER_VERSION PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
+    org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
+    org.opencontainers.image.title="coredns" \
+    org.opencontainers.image.description="DoubleU Labs CoreDNS" \
+    org.opencontainers.image.license="MIT" \
+    io.coredns.version="v${COREDNS_VERSION}" \
+    codes.doubleu.labs.coredns.plugin.filter.version="v${PLUGIN_COREDNS_FILTER_VERSION}" \
+    codes.doubleu.labs.coredns.plugin.netboxdns.version="v${PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION}"
+
+COPY --from=BUILDER /coredns/coredns /
+
+COPY --from=BUILDER /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+    /etc/ssl/certs/ca-certificates.crt
+
+COPY --from=BUILDER /sbin/nologin /sbin/
+
+COPY --from=BUILDER /coredns/user/group /coredns/user/passwd /etc/
+
+EXPOSE 53/tcp 53/udp 443/tcp 853/tcp
+
+USER coredns
+
+ENTRYPOINT [ "/coredns" ]
