@@ -13,6 +13,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - id: get-tags
+      run: |
+        VERSION=$(cat coredns/VERSION)
+        TAGS=(
+          "ghcr.io/doubleu-labs/coredns:latest"
+          "ghcr.io/doubleu-labs/coredns:${VERSION}"
+          "quay.io/doubleu-labs/coredns:latest"
+          "quay.io/doubleu-labs/coredns:${VERSION}"
+        )
+        TAGSCSV=$(printf '%s,' "${TAGS[@]}")
+        echo "tags=${TAGSCSV:0:-1}" >> $GITHUB_OUTPUT
     - uses: docker/setup-qemu-action@v3
       with:
         platforms: ${{ env.PLATFORMS }}
@@ -34,6 +45,4 @@ jobs:
         file: coredns/Containerfile
         platforms: ${{ env.PLATFORMS }}
         push: true
-        tags: |
-          ghcr.io/doubleu-labs/coredns:latest
-          quay.io/doubleu-labs/coredns:latest
+        tags: ${{ steps.get-tags.outputs.tags }}
