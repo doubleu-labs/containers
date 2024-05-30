@@ -1,0 +1,20 @@
+ARG NETBOX_VERSION=4.0.3
+ARG NETBOX_PLUGIN_DNS_VERSION=1.0.1
+
+#===============================================================================
+
+FROM ghcr.io/netbox-community/netbox:v${NETBOX_VERSION}
+
+ARG NETBOX_PLUGIN_DNS_VERSION
+RUN /opt/netbox/venv/bin/pip install \
+    --no-warn-script-location \
+    "netbox-plugin-dns==${NETBOX_PLUGIN_DNS_VERSION}"
+
+ARG NETBOX_VERSION NETBOX_PLUGIN_DNS_VERSION
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
+    org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
+    org.opencontainers.image.title="netbox" \
+    org.opencontainers.image.description="DoubleU Labs Netbox" \
+    org.opencontainers.image.license="MIT" \
+    com.netboxlabs.version="v${NETBOX_VERSION}" \
+    com.github.peteeckel.netbox-plugin-dns.version="${NETBOX_PLUGIN_DNS_VERSION}"
