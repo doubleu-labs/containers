@@ -43,7 +43,7 @@ jobs:
       with:
         builder: ${{ steps.buildx.outputs.name }}
         file: valkey/Containerfile
-        context: ./valkey/
+        context: .
         platforms: ${{ env.PLATFORMS }}
         push: true
         tags: ${{ steps.get-tags.outputs.tags }}
