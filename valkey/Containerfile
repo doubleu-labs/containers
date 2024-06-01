@@ -1,0 +1,54 @@
+ARG VALKEY_VERSION=7.2.5
+
+#===============================================================================
+
+FROM registry.fedoraproject.org/fedora:40 as BUILDER
+
+RUN mkdir -p /builder/root
+
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+    gcc \
+    make \
+    openssl-devel \
+    which
+
+RUN dnf --installroot=/builder/root/ --releasever=40 \
+    install -y --setopt=install_weak_deps=False --nodocs \
+    bash \
+    openssl-devel && \
+    dnf --installroot=/builder/root/ clean all
+
+RUN useradd valkey --no-log-init -U -M -s /sbin/nologin
+RUN echo $(grep valkey /etc/group) >> /builder/root/etc/group && \
+    echo $(grep valkey /etc/passwd) >> /builder/root/etc/passwd
+
+COPY entrypoint.sh /builder/root/usr/local/bin/
+
+RUN mkdir /builder/root/data && chown valkey:valkey /builder/root/data
+
+ARG VALKEY_VERSION
+RUN curl -L "https://github.com/valkey-io/valkey/archive/refs/tags/${VALKEY_VERSION}.tar.gz/" | \
+    tar -C /builder -zxvf - && \
+    ln -s /builder/valkey-${VALKEY_VERSION} /builder/valkey
+
+RUN export BUILD_TLS=yes USE_REDIS_SYMLINKS=no && \
+    make -C /builder/valkey && \
+    make -C /builder/valkey PREFIX=/builder/root install
+
+#===============================================================================
+
+FROM scratch
+
+COPY --from=BUILDER /builder/root/ /
+
+VOLUME /data
+
+WORKDIR /data
+
+USER valkey
+
+EXPOSE 6379
+
+ENTRYPOINT [ "entrypoint.sh" ]
+
+CMD [ "valkey-server" ]
