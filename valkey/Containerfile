@@ -22,7 +22,7 @@ RUN useradd valkey --no-log-init -U -M -s /sbin/nologin
 RUN echo $(grep valkey /etc/group) >> /builder/root/etc/group && \
     echo $(grep valkey /etc/passwd) >> /builder/root/etc/passwd
 
-COPY entrypoint.sh /builder/root/usr/local/bin/
+COPY ./entrypoint.sh /builder/root/usr/local/bin/
 
 RUN mkdir /builder/root/data && chown valkey:valkey /builder/root/data
 
