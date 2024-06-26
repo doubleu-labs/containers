@@ -1,5 +1,5 @@
-ARG NETBOX_VERSION=4.0.3
-ARG NETBOX_PLUGIN_DNS_VERSION=1.0.1
+ARG NETBOX_VERSION=4.0.6
+ARG NETBOX_PLUGIN_DNS_VERSION=1.0.4
 
 #===============================================================================
 
