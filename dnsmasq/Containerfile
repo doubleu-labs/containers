@@ -1,0 +1,58 @@
+ARG DNSMASQ_VERSION="2.90"
+
+################################################################################
+
+FROM registry.fedoraproject.org/fedora:40 as BUILDER
+
+RUN mkdir -p /builder /scratch/var/lib/misc
+
+RUN dnf install -y --setopt=install_weak_deps=False --nodoc \
+    gcc \
+    gettext \
+    make \
+    pkgconf-pkg-config
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+    --nodoc --installroot=/scratch --releasever=40 \
+    coreutils \
+    glibc \
+    && dnf --installroot=/scratch clean all
+
+ARG DNSMASQ_VERSION
+RUN curl -L -o - https://dnsmasq.org/dnsmasq-${DNSMASQ_VERSION}.tar.xz | \
+    tar Jxv -C /builder
+
+WORKDIR /builder/dnsmasq-${DNSMASQ_VERSION}
+
+RUN make install DESTDIR="/scratch" COPTS="-DHAVE_BROKEN_RTC"
+
+RUN setcap 'cap_net_bind_service,cap_net_admin,cap_net_raw=+ep' \
+    /scratch/usr/local/sbin/dnsmasq
+
+RUN useradd dnsmasq --no-log-init -U -M -s /sbin/nologin
+
+RUN grep -E '^dnsmasq:.*' /etc/passwd >> /scratch/etc/passwd && \
+    grep -E '^dnsmasq:.*' /etc/group >> /scratch/etc/group && \
+    grep -E '^dnsmasq:.*' /etc/shadow >> /scratch/etc/shadow
+
+RUN chgrp dnsmasq /scratch/var/lib/misc/ && chmod 775 /scratch/var/lib/misc/
+
+################################################################################
+
+FROM scratch
+
+ARG DNSMASQ_VERSION
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
+    org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
+    org.opencontainers.image.title="dnsmasq" \
+    org.opencontainers.image.description="DoubleU Labs dnsmasq" \
+    org.opencontainers.image.license="MIT" \
+    org.dnsmasq.version="${DNSMASQ_VERSION}"
+
+COPY --from=BUILDER /scratch /
+
+EXPOSE 53/udp 53/tcp 67/udp 69/udp
+
+USER dnsmasq
+
+CMD [ "/usr/local/sbin/dnsmasq", "-d" ]
