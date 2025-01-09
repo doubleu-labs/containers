@@ -1,13 +1,14 @@
-ARG GO_VERSION=1.23.2
-ARG COREDNS_VERSION=1.11.3
-ARG PLUGIN_COREDNS_FILTER_VERSION=0.3.0
-ARG PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION=0.1.1
+ARG FEDORA_VERSION=41
+ARG GO_VERSION=1.23.3
+ARG COREDNS_VERSION=1.12.0
+ARG PLUGIN_COREDNS_FILTER_VERSION=0.3.1
+ARG PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION=0.1.2
 
 #===============================================================================
 
-FROM --platform=$BUILDPLATFORM registry.fedoraproject.org/fedora:40 as BUILDER
+FROM --platform=$BUILDPLATFORM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
 
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+RUN dnf install -y --setopt=install_weak_deps=False --no-docs \
     ca-certificates git make
 
 ARG BUILDARCH GO_VERSION
@@ -57,14 +58,14 @@ LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/container
     codes.doubleu.labs.coredns.plugin.filter.version="v${PLUGIN_COREDNS_FILTER_VERSION}" \
     codes.doubleu.labs.coredns.plugin.netboxdns.version="v${PLUGIN_COREDNS_NETBOX_PLUGIN_DNS_VERSION}"
 
-COPY --from=BUILDER /coredns/coredns /
+COPY --from=builder /coredns/coredns /
 
-COPY --from=BUILDER /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+COPY --from=builder /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
     /etc/ssl/certs/ca-certificates.crt
 
-COPY --from=BUILDER /sbin/nologin /sbin/
+COPY --from=builder /sbin/nologin /sbin/
 
-COPY --from=BUILDER /coredns/user/group /coredns/user/passwd /etc/
+COPY --from=builder /coredns/user/group /coredns/user/passwd /etc/
 
 EXPOSE 53/tcp 53/udp 443/tcp 853/tcp
 
