@@ -24,6 +24,17 @@ jobs:
         )
         TAGSCSV=$(printf '%s,' "${TAGS[@]}")
         echo "tags=${TAGSCSV:0:-1}" >> $GITHUB_OUTPUT
+    - id: get-nortctags
+      run: |
+        VERSION=$(cat dnsmasq/VERSION)
+        TAGS=(
+          "ghcr.io/doubleu-labs/dnsmasq-nortc:latest"
+          "ghcr.io/doubleu-labs/dnsmasq-nortc:${VERSION}"
+          "quay.io/doubleu-labs/dnsmasq-nortc:latest"
+          "quay.io/doubleu-labs/dnsmasq-nortc:${VERSION}"
+        )
+        TAGSCSV=$(printf '%s,' "${TAGS[@]}")
+        echo "tags=${TAGSCSV:0:-1}" >> $GITHUB_OUTPUT
     - uses: docker/setup-qemu-action@v3
       with:
         platforms: ${{ env.PLATFORMS }}
@@ -39,10 +50,20 @@ jobs:
         registry: quay.io
         username: ${{ secrets.QUAY_USERNAME }}
         password: ${{ secrets.QUAY_TOKEN }}
-    - uses: docker/build-push-action@v5
+    - uses: docker/build-push-action@v6
       with:
         builder: ${{ steps.buildx.outputs.name }}
         file: dnsmasq/Containerfile
         platforms: ${{ env.PLATFORMS }}
         push: true
         tags: ${{ steps.get-tags.outputs.tags }}
+    - uses: docker/build-push-action@v6
+      with:
+        builder: ${{ steps.buildx.outputs.name }}
+        file: dnsmasq/Containerfile
+        build-args: |
+          IMG_TITLE="dnsmasq-nortc"
+          BUILD_COPTS="-DHAVE_BROKEN_RTC"
+        platforms: ${{ env.PLATFORMS }}
+        push: true
+        tags: ${{ steps.get-nortctags.outputs.tags }}

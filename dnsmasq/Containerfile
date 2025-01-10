@@ -1,19 +1,21 @@
+ARG FEDORA_VERSION=41
 ARG DNSMASQ_VERSION="2.90"
 
 ################################################################################
 
-FROM registry.fedoraproject.org/fedora:40 as BUILDER
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
 
 RUN mkdir -p /builder /scratch/var/lib/misc
 
-RUN dnf install -y --setopt=install_weak_deps=False --nodoc \
+RUN dnf install -y --setopt=install_weak_deps=False --no-docs \
     gcc \
     gettext \
     make \
     pkgconf-pkg-config
 
-RUN dnf install -y --setopt=install_weak_deps=False \
-    --nodoc --installroot=/scratch --releasever=40 \
+ARG FEDORA_VERSION
+RUN dnf --installroot=/scratch --releasever=${FEDORA_VERSION} \
+    install -y --setopt=install_weak_deps=False --no-docs --use-host-config \
     coreutils \
     glibc \
     && dnf --installroot=/scratch clean all
@@ -24,16 +26,17 @@ RUN curl -L -o - https://dnsmasq.org/dnsmasq-${DNSMASQ_VERSION}.tar.xz | \
 
 WORKDIR /builder/dnsmasq-${DNSMASQ_VERSION}
 
-RUN make install DESTDIR="/scratch" COPTS="-DHAVE_BROKEN_RTC"
+ARG BUILD_COPTS
+RUN make install DESTDIR="/scratch" COPTS="${BUILD_COPTS}"
 
-RUN setcap 'cap_net_bind_service,cap_net_admin,cap_net_raw=+ep' \
+RUN setcap "cap_net_bind_service,cap_net_admin,cap_net_raw=+ep" \
     /scratch/usr/local/sbin/dnsmasq
 
 RUN useradd dnsmasq --no-log-init -U -M -s /sbin/nologin
 
-RUN grep -E '^dnsmasq:.*' /etc/passwd >> /scratch/etc/passwd && \
-    grep -E '^dnsmasq:.*' /etc/group >> /scratch/etc/group && \
-    grep -E '^dnsmasq:.*' /etc/shadow >> /scratch/etc/shadow
+RUN grep -E "^dnsmasq:.*" /etc/passwd >> /scratch/etc/passwd && \
+    grep -E "^dnsmasq:.*" /etc/group >> /scratch/etc/group && \
+    grep -E "^dnsmasq:.*" /etc/shadow >> /scratch/etc/shadow
 
 RUN chgrp dnsmasq /scratch/var/lib/misc/ && chmod 775 /scratch/var/lib/misc/
 
@@ -42,17 +45,20 @@ RUN chgrp dnsmasq /scratch/var/lib/misc/ && chmod 775 /scratch/var/lib/misc/
 FROM scratch
 
 ARG DNSMASQ_VERSION
+ARG IMG_TITLE="dnsmasq"
 LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
     org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
-    org.opencontainers.image.title="dnsmasq" \
+    org.opencontainers.image.title="${IMG_TITLE}" \
     org.opencontainers.image.description="DoubleU Labs dnsmasq" \
     org.opencontainers.image.license="MIT" \
     org.dnsmasq.version="${DNSMASQ_VERSION}"
 
-COPY --from=BUILDER /scratch /
+COPY --from=builder /scratch /
 
 EXPOSE 53/udp 53/tcp 67/udp 69/udp
 
 USER dnsmasq
+
+VOLUME [ "/var/lib/misc/dnsmasq.leases" ]
 
 CMD [ "/usr/local/sbin/dnsmasq", "-d" ]
