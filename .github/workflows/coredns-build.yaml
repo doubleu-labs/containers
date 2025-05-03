@@ -20,12 +20,16 @@ jobs:
       matrix:
         target:
           - arch: linux/amd64
+            arch-clean: linux-amd64
             runner: ubuntu-24.04
           - arch: linux/arm64
+            arch-clean: linux-arm64
             runner: ubuntu-24.04-arm
           - arch: linux/arm/v7
+            arch-clean: linux-arm-v7
             runner: ubuntu-24.04-arm
           - arch: linux/arm/v6
+            arch-clean: linux-arm-v6
             runner: ubuntu-24.04-arm
     name: Build Container (${{ matrix.target.arch }})
     runs-on: ${{ matrix.target.runner }}
@@ -71,7 +75,7 @@ jobs:
     - name: Upload digest
       uses: actions/upload-artifact@v4
       with:
-        name: digests-linux-${{ matrix.target.arch }}
+        name: digests-linux-${{ matrix.target.arch-clean }}
         path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
