@@ -1,16 +1,18 @@
-ARG FEDORA_VERSION=41
-ARG VALKEY_VERSION=8.0.2
+ARG FEDORA_VERSION=42
+ARG VALKEY_VERSION=8.1.1
 
 #===============================================================================
 
-FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} as BUILDER
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
 
 RUN mkdir -p /builder/root
 
 RUN dnf install -y --setopt=install_weak_deps=False --no-docs \
+    gawk \
     gcc \
     make \
     openssl-devel \
+    python3 \
     which
 
 ARG FEDORA_VERSION
@@ -41,7 +43,7 @@ RUN export BUILD_TLS=yes USE_REDIS_SYMLINKS=no && \
 
 FROM scratch
 
-COPY --from=BUILDER /builder/root/ /
+COPY --from=builder /builder/root/ /
 
 VOLUME /data
 
