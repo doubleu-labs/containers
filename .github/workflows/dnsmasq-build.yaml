@@ -27,11 +27,11 @@ jobs:
           - arch: linux/arm64
             runner: ubuntu-24.04-arm
         build:
-          - image-name: dnsmasq
+          - image-title: dnsmasq
             copts: ""
-          - image-name: dnsmasq-nortc
+          - image-title: dnsmasq-nortc
             copts: "-DHAVE_BROKEN_RTC"
-    name: Build ${{ matrix.build.image-name }} (${{ matrix.target.arch }})
+    name: Build ${{ matrix.build.image-title }} (${{ matrix.target.arch }})
     runs-on: ${{ matrix.target.runner }}
     steps:
     #===========================================================================
