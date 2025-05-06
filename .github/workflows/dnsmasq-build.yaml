@@ -69,7 +69,7 @@ jobs:
         context: ${{ env.CONTAINER }}/
         build-args: |
           IMG_TITLE="${{ matrix.build.image-title }}"
-          BUILD_COPTS="${{ matrix.build.copts }}"
+          BUILD_COPTS=${{ matrix.build.copts }}
         tags: |
           ghcr.io/${{ github.repository_owner }}/${{ matrix.build.image-title }}
           quay.io/${{ github.repository_owner }}/${{ matrix.build.image-title }}
