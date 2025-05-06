@@ -1,5 +1,5 @@
-ARG FEDORA_VERSION=41
-ARG DNSMASQ_VERSION="2.90"
+ARG FEDORA_VERSION=42
+ARG DNSMASQ_VERSION="2.91"
 
 ################################################################################
 
@@ -45,7 +45,7 @@ RUN chgrp dnsmasq /scratch/var/lib/misc/ && chmod 775 /scratch/var/lib/misc/
 FROM scratch
 
 ARG DNSMASQ_VERSION
-ARG IMG_TITLE="dnsmasq"
+ARG IMG_TITLE
 LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
     org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
     org.opencontainers.image.title="${IMG_TITLE}" \

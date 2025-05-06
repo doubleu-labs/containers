@@ -1,4 +1,3 @@
----
 name: Build dnsmasq
 on:
   push:
@@ -7,63 +6,148 @@ on:
     - '!dnsmasq/README.md'
   workflow_dispatch:
 env:
-  PLATFORMS: linux/amd64,linux/arm64
+  CONTAINER: dnsmasq
+
+################################################################################
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - arch: linux/amd64
+            runner: ubuntu-24.04
+            image: dnsmasq
+          - arch: linux/arm64
+            runner: ubuntu-24.04-arm
+        build:
+          - image-name: dnsmasq
+            copts: ""
+          - image-name: dnsmasq-nortc
+            copts: "-DHAVE_BROKEN_RTC"
+    name: Build ${{ matrix.build.image-name }} (${{ matrix.target.arch }})
+    runs-on: ${{ matrix.target.runner }}
     steps:
-    - uses: actions/checkout@v4
-    - id: get-tags
+    #===========================================================================
+    - name: Checkout
+      uses: actions/checkout@v4
+    #===========================================================================
+    - name: Prepare Platform
+      id: platform
       run: |
-        VERSION=$(cat dnsmasq/VERSION)
-        TAGS=(
-          "ghcr.io/doubleu-labs/dnsmasq:latest"
-          "ghcr.io/doubleu-labs/dnsmasq:${VERSION}"
-          "quay.io/doubleu-labs/dnsmasq:latest"
-          "quay.io/doubleu-labs/dnsmasq:${VERSION}"
-        )
-        TAGSCSV=$(printf '%s,' "${TAGS[@]}")
-        echo "tags=${TAGSCSV:0:-1}" >> $GITHUB_OUTPUT
-    - id: get-nortctags
-      run: |
-        VERSION=$(cat dnsmasq/VERSION)
-        TAGS=(
-          "ghcr.io/doubleu-labs/dnsmasq-nortc:latest"
-          "ghcr.io/doubleu-labs/dnsmasq-nortc:${VERSION}"
-          "quay.io/doubleu-labs/dnsmasq-nortc:latest"
-          "quay.io/doubleu-labs/dnsmasq-nortc:${VERSION}"
-        )
-        TAGSCSV=$(printf '%s,' "${TAGS[@]}")
-        echo "tags=${TAGSCSV:0:-1}" >> $GITHUB_OUTPUT
-    - uses: docker/setup-qemu-action@v3
-      with:
-        platforms: ${{ env.PLATFORMS }}
-    - uses: docker/setup-buildx-action@v3
-      id: buildx
-    - uses: docker/login-action@v3
+        platform=${{ matrix.target.arch }}
+        echo "platform=${platform//\//-}" >> $GITHUB_OUTPUT
+    #===========================================================================
+    - name: Login to GHCR
+      uses: docker/login-action@v3
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ github.token }}
-    - uses: docker/login-action@v3
+    #===========================================================================
+    - name: Login to Quay
+      uses: docker/login-action@v3
       with:
         registry: quay.io
         username: ${{ secrets.QUAY_USERNAME }}
         password: ${{ secrets.QUAY_TOKEN }}
-    - uses: docker/build-push-action@v6
+    #===========================================================================
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    #===========================================================================
+    - name: Build and Push by Digest
+      id: build
+      uses: docker/build-push-action@v6
       with:
-        builder: ${{ steps.buildx.outputs.name }}
-        file: dnsmasq/Containerfile
-        platforms: ${{ env.PLATFORMS }}
-        push: true
-        tags: ${{ steps.get-tags.outputs.tags }}
-    - uses: docker/build-push-action@v6
-      with:
-        builder: ${{ steps.buildx.outputs.name }}
-        file: dnsmasq/Containerfile
+        platforms: ${{ matrix.target.arch }}
+        file: ${{ env.CONTAINER }}/Containerfile
+        context: ${{ env.CONTAINER }}/
         build-args: |
-          IMG_TITLE="dnsmasq-nortc"
-          BUILD_COPTS="-DHAVE_BROKEN_RTC"
-        platforms: ${{ env.PLATFORMS }}
-        push: true
-        tags: ${{ steps.get-nortctags.outputs.tags }}
+          IMG_TITLE="${{ matrix.build.image-title }}""
+          BUILD_COPTS="${{ matrix.build.copts }}"
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/${{ matrix.build.image-title }}
+          quay.io/${{ github.repository_owner }}/${{ matrix.build.image-title }}
+        outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+    #===========================================================================
+    - name: Export Digest
+      run: |
+        mkdir -p ${{ runner.temp }}/digests/${{ matrix.build.image-title }}
+        digest="${{ steps.build.outputs.digest }}"
+        touch "${{ runner.temp }}/digests/${{ matrix.build.image-title }}/${digest#sha256:}"
+    #===========================================================================
+    - name: Upload Digest
+      uses: actions/upload-artifact@v4
+      with:
+        name: digests-${{ matrix.build.image-title}}-${{ steps.platform.outputs.platform }}
+        path: ${{ runner.temp }}/digests/${{ matrix.build.image-title }}/*
+        if-no-files-found: error
+        retention-days: 1
+
+################################################################################
+
+  merge_platform_containers:
+    name: Merge Platform Containers
+    strategy:
+      fail-fast: true
+      matrix:
+        image-title: [ dnsmasq, dnsmasq-nortc ]
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    #===========================================================================
+    - name: Checkout
+      uses: actions/checkout@v4
+    #===========================================================================
+    - name: Get Version From File
+      id: version
+      run: echo "version=$(cat ${{ env.CONTAINER }}/VERSION)" >> $GITHUB_OUTPUT
+    #===========================================================================
+    - name: Download Digests
+      uses: actions/download-artifact@v4
+      with:
+        path: ${{ runner.temp }}/digests/${{ matrix.image-title }}
+        pattern: digests-${{ matrix.image-title }}*
+        merge-multiple: true
+    #===========================================================================
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    #===========================================================================
+    - name: Login to Quay
+      uses: docker/login-action@v3
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_TOKEN }}
+    #===========================================================================
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    #===========================================================================
+    - name: Docker Meta
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository_owner }}/${{ matrix.image-title }}
+          quay.io/${{ github.repository_owner }}/${{ matrix.image-title }}
+        tags: |
+          type=raw,latest
+          type=raw,${{ steps.version.outputs.version }}
+    #===========================================================================
+    - name: Create Manifest List and Push
+      working-directory: ${{ runner.temp }}/digests/${{ matrix.image-title }}
+      run: |
+        docker buildx imagetools create \
+          $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          $(printf 'ghcr.io/${{ github.repository_owner }}/${{ matrix.image-title }}@sha256:%s ' *) \
+          $(printf 'quay.io/${{ github.repository_owner }}/${{ matrix.image-title }}@sha256:%s ' *) \
