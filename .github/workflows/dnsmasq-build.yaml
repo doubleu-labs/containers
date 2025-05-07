@@ -84,7 +84,7 @@ jobs:
     - name: Upload Digest
       uses: actions/upload-artifact@v4
       with:
-        name: digests-${{ matrix.build.image-title}}-${{ steps.platform.outputs.platform }}
+        name: digests-${{ steps.platform.outputs.platform }}-${{ matrix.build.image-title}}
         path: ${{ runner.temp }}/digests/${{ matrix.build.image-title }}/*
         if-no-files-found: error
         retention-days: 1
@@ -111,8 +111,8 @@ jobs:
     - name: Download Digests
       uses: actions/download-artifact@v4
       with:
-        path: ${{ runner.temp }}/digests/${{ matrix.image-title }}
-        pattern: digests-${{ matrix.image-title }}*
+        path: ${{ runner.temp }}/digests/${{ matrix.image-title }}/
+        pattern: digests-*-${{ matrix.image-title }}
         merge-multiple: true
     #===========================================================================
     - name: Login to GHCR
