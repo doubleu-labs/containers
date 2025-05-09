@@ -1,13 +1,12 @@
-ARG NETBOX_VERSION=4.2.1
-ARG NETBOX_PLUGIN_DNS_VERSION=1.2.0
+ARG NETBOX_VERSION=4.3.0
+ARG NETBOX_PLUGIN_DNS_VERSION=1.3.0
 
 #===============================================================================
 
 FROM ghcr.io/netbox-community/netbox:v${NETBOX_VERSION}
 
 ARG NETBOX_PLUGIN_DNS_VERSION
-RUN /opt/netbox/venv/bin/pip install \
-    --no-warn-script-location \
+RUN /usr/local/bin/uv pip install  \
     "netbox-plugin-dns==${NETBOX_PLUGIN_DNS_VERSION}"
 
 ARG NETBOX_VERSION NETBOX_PLUGIN_DNS_VERSION
