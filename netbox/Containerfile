@@ -1,19 +1,121 @@
-ARG NETBOX_VERSION=4.3.0
-ARG NETBOX_PLUGIN_DNS_VERSION=1.3.0
+ARG FEDORA_VERSION=42
+ARG NETBOX_VERSION=4.3.1
+ARG NETBOX_DOCKER_VERSION=3.3.0
 
 #===============================================================================
 
-FROM ghcr.io/netbox-community/netbox:v${NETBOX_VERSION}
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
 
-ARG NETBOX_PLUGIN_DNS_VERSION
-RUN /usr/local/bin/uv pip install  \
-    "netbox-plugin-dns==${NETBOX_PLUGIN_DNS_VERSION}"
+RUN mkdir -p /builder/netbox{,-docker} /scratch/opt/netbox
 
-ARG NETBOX_VERSION NETBOX_PLUGIN_DNS_VERSION
-LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
-    org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
-    org.opencontainers.image.title="netbox" \
-    org.opencontainers.image.description="DoubleU Labs Netbox" \
-    org.opencontainers.image.license="MIT" \
-    com.netboxlabs.version="v${NETBOX_VERSION}" \
-    com.github.peteeckel.netbox-plugin-dns.version="${NETBOX_PLUGIN_DNS_VERSION}"
+RUN dnf install -y --setopt=install_weak_deps=False --no-docs \
+    gcc \
+    git \
+    gnupg2 \
+    libpq-devel \
+    openldap-devel \
+    openssl-devel \
+    libgsasl-devel \
+    libtool-ltdl-devel \
+    libxml2-devel \
+    libxslt-devel \
+    pkgconf-pkg-config \
+    python3-devel \
+    uv \
+    xmlsec1-devel \
+    xmlsec1-openssl-devel
+
+ARG NETBOX_VERSION
+RUN git clone https://github.com/netbox-community/netbox \
+    --depth 1 \
+    --branch v${NETBOX_VERSION} \
+    /builder/netbox
+
+ARG NETBOX_DOCKER_VERSION
+RUN git clone https://github.com/netbox-community/netbox-docker \
+    --depth 1 \
+    --branch ${NETBOX_DOCKER_VERSION} \
+    /builder/netbox-docker
+
+RUN sed -i \
+    -e '/gunicorn/d' \
+    -e 's/social-auth-core/social-auth-core\[all\]/g' \
+    -e 's/django-storages/django-storages\[azure,boto3,dropbox,google,libcloud,sftp\]/g' \
+    /builder/netbox/requirements.txt
+
+RUN /usr/bin/uv venv /scratch/opt/netbox/venv
+
+ENV VIRTUAL_ENV=/scratch/opt/netbox/venv
+
+COPY requirements-uul.txt /builder/netbox/
+
+RUN cp /builder/netbox-docker/requirements-container.txt /builder/netbox/
+
+RUN /usr/bin/uv pip install \
+    -r /builder/netbox/requirements.txt \
+    -r /builder/netbox/requirements-container.txt \
+    -r /builder/netbox/requirements-uul.txt
+
+RUN curl -fsSLO --output-dir /tmp 'https://unit.nginx.org/keys/nginx-keyring.gpg' && \
+    gpg --import /tmp/nginx-keyring.gpg && \
+    gpg --export --armor < /tmp/nginx-keyring.gpg > /tmp/nginx-keyring.asc && \
+    rpm --root /scratch --import /tmp/nginx-keyring.asc
+
+ARG FEDORA_VERSION TARGETARCH
+RUN dnf --installroot=/scratch --releasever=${FEDORA_VERSION} \
+    --repofrompath='unit,https://packages.nginx.org/unit/fedora/41/$basearch/' \
+    install -y --setopt=install_weak_deps=False --no-docs --use-host-config \
+    unit \
+    unit-python313
+
+RUN dnf --installroot=/scratch --releasever=${FEDORA_VERSION} \
+    install -y --setopt=install_weak_deps=False --no-docs --use-host-config \
+    bzip2 \
+    ca-certificates \
+    curl \
+    libpq \
+    openldap \
+    openssh-clients \
+    openssl \
+    python3 \
+    tini \
+    uv \
+    xmlsec1-openssl
+
+RUN useradd netbox --no-log-init -U -M -s /sbin/nologin
+
+RUN grep -E "^netbox:.*" /etc/passwd >> /scratch/etc/passwd && \
+    grep -E "^netbox:.*" /etc/group >> /scratch/etc/group && \
+    grep -E "^netbox:.*" /etc/shadow >> /scratch/etc/shadow
+
+#===============================================================================
+
+FROM scratch
+
+COPY --from=builder /scratch /
+COPY --from=builder /builder/netbox/ /opt/netbox
+COPY --from=builder /builder/netbox-docker/docker/configuration.docker.py /opt/netbox/netbox/netbox/configuration.py
+COPY --from=builder /builder/netbox-docker/docker/ldap_config.docker.py /opt/netbox/netbox/netbox/ldap_config.py
+COPY --from=builder /builder/netbox-docker/docker/docker-entrypoint.sh /opt/netbox/docker-entrypoint.sh
+COPY --from=builder /builder/netbox-docker/docker/housekeeping.sh /opt/netbox/housekeeping.sh
+COPY --from=builder /builder/netbox-docker/docker/launch-netbox.sh /opt/netbox/launch-netbox.sh
+COPY --from=builder /builder/netbox-docker/configuration/ /etc/netbox/config/
+COPY --from=builder /builder/netbox-docker/docker/nginx-unit.json /etc/unit/
+
+RUN mkdir -p /opt/netbox/netbox/static /opt/unit/{state,tmp}
+RUN chown -R unit:netbox /opt/unit /opt/netbox/netbox/{media,reports,scripts}
+RUN chmod -R g+w /opt/unit /opt/netbox/netbox/{media,reports,scripts}
+
+RUN SECRET_KEY="dummyKeyWithMinimumLength-------------------------" \
+    /opt/netbox/venv/bin/python -m mkdocs build --config-file /opt/netbox/mkdocs.yml \
+    --site-dir /opt/netbox/netbox/project-static/docs/
+RUN DEBUG="true" SECRET_KEY="dummyKeyWithMinimumLength-------------------------" \
+    /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py collectstatic --no-input
+
+USER netbox
+WORKDIR /opt/netbox/netbox
+ENV LANG=C.utf8
+ENV PATH=/opt/netbox/venv/bin:$PATH
+ENV VIRTUAL_ENV=/opt/netbox/venv
+ENV UV_NO_CACHE=1
+CMD [ "/opt/netbox/docker-entrypoint.sh", "/opt/netbox/launch-netbox.sh" ]
