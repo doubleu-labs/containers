@@ -1,0 +1,23 @@
+ARG FEDORA_VERSION=42
+ARG KUBECLIENT_VERSION=1.32
+
+#===============================================================================
+
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
+
+RUN mkdir -p /builder/root
+
+ARG FEDORA_VERSION KUBECLIENT_VERSION
+RUN dnf --installroot=/builder/root --releasever=${FEDORA_VERSION} \
+    install -y --setopt=install_weak_deps=False --no-docs --use-host-config \
+    bash \
+    "kubernetes${KUBECLIENT_VERSION}-client" && \
+    dnf --installroot=/builder/root clean all
+
+#===============================================================================
+
+FROM scratch
+
+COPY --from=builder /builder/root /
+
+ENTRYPOINT [ "/bin/bash" ]
