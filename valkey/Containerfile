@@ -19,7 +19,6 @@ ARG FEDORA_VERSION
 RUN dnf --installroot=/builder/root/ --releasever=${FEDORA_VERSION} \
     install -y --setopt=install_weak_deps=False --no-docs --use-host-config \
     bash \
-    bind-utils \
     ncurses \
     openssl-devel && \
     dnf --installroot=/builder/root/ clean all
