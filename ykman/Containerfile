@@ -1,0 +1,76 @@
+ARG BUILD_TIME
+ARG REVISION
+ARG FEDORA_VERSION="43"
+ARG YKMAN_VERSION="5.8.0"
+
+################################################################################
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} as builder
+
+RUN mkdir -p /scratch/run/pcscd
+
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+        python3 \
+        python3-pip \
+        python3-pyscard
+
+RUN dnf install \
+        --assumeyes \
+        --installroot=/scratch \
+        --use-host-config \
+        --no-docs \
+        --setopt=install_weak_deps=False \
+        dbus-daemon \
+        pcsc-lite \
+        python3 \
+        python3-pyscard && \
+    dnf clean all \
+        --installroot=/scratch
+
+ARG YKMAN_VERSION
+RUN pip install \
+        --root=/scratch \
+        --root-user-action=ignore \
+        --no-warn-script-location \
+        "yubikey-manager==${YKMAN_VERSION}"
+
+RUN useradd \
+        --user-group \
+        --create-home \
+        --shell=/bin/bash \
+        --prefix=/scratch \
+        ykman
+
+RUN USER_ID=$(grep ykman /scratch/etc/passwd | cut -d':' -f3); \
+    GROUP_ID=$(grep ykman /scratch/etc/passwd | cut -d':' -f4); \
+    chown $USER_ID:$GROUP_ID /scratch/run/pcscd
+
+################################################################################
+
+FROM scratch
+
+ARG BUILD_TIME
+ARG REVISION
+ARG YKMAN_VERSION
+LABEL org.opencontainers.image.created="$BUILD_TIME"
+LABEL org.opencontainers.image.authors="W Anders <w@doubleu.codes>"
+LABEL org.opencontainers.image.url="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.documentation="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.revision="$REVISION"
+LABEL org.opencontainers.image.vendor="DoubleU Labs"
+LABEL org.opencontainers.image.licenses="MIT,BSD-2-Clause"
+LABEL org.opencontainers.image.title="DoubleU Labs yubikey-manager (ykman)"
+LABEL org.opencontainers.image.description="Manage YubiKey devices from a container."
+LABEL com.yubico.yubikey-manager.version="$YKMAN_VERSION"
+
+COPY --from=builder /scratch /
+
+COPY ./entrypoint.sh /usr/local/bin/entrypoint.sh
+
+USER ykman
+
+WORKDIR /home/ykman
+
+ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
+
+CMD [ "/bin/bash" ]
