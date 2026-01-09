@@ -75,6 +75,37 @@ GROUP="yubikey", \
 TAG+="uaccess"
 ```
 
+If `pcscd` is running on the host system, then it will take exclusive control
+of the Yubikey, preventing `pcscd` in the container from communicating with it.
+If you cannot permanently disable `pcscd` on the host, then an additional Udev
+rule will be needed. This will require the serial number to be visible over USB,
+so use Yubikey Manager on either the host system with `pcscd` temporarily
+disabled, on a separate host where `pcscd` is not required and using this
+container, or on a separate host where `>=v5.8.0` can run directly.
+
+```sh
+ykman otp settings --serial-usb-visible
+```
+
+Once that is done, append the following to `/etc/udev/rules.d/99-yubikey.rules`,
+or whatever you named the `.rules` file:
+
+```conf
+SUBSYSTEM=="usb", \
+ATTRS{idVendor}=="1050", \
+ATTRS{idProduct}=="0401|0402|0403|0404|0405|0406|0407", \
+ATTRS{serial}=="0123456789", \
+ENV{PCSCLITE_IGNORE}="1"
+```
+
+Udev will read the serial number as 10 digits, even if `ykman` shows less, so
+you'll need to left-pad it with zeros (eg. `12345678` becomes `0012345678`).
+
+This rule disables `pcscd` on the host from communicating with that specific
+YubiKey.
+
+Now reload and trigger Udev.
+
 ```sh
 sudo udevadm control --reload && sudo udevadm trigger
 ```
