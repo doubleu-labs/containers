@@ -59,7 +59,7 @@ jobs:
       id: build_env
       run: |
         echo "BUILD_TIME=$(date --rfc-3339=seconds)" >> $GITHUB_OUTPUT
-        echo "REVISION=$(cat ${{ env.CONTAINER }} | cut -d'-' -f2)" >> $GITHUB_OUTPUT
+        echo "REVISION=$(cat ${{ env.CONTAINER }}/VERSION | cut -d'-' -f2)" >> $GITHUB_OUTPUT
     #===========================================================================
     - name: Build and Push by Digest
       id: build
