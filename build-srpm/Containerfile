@@ -1,0 +1,31 @@
+ARG BUILD_TIME
+ARG REVISION
+ARG FEDORA_VERSION="43"
+
+################################################################################
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION}
+
+RUN mkdir /output
+
+RUN dnf config-manager setopt fedora-source.enabled=1 \
+    && dnf install -y rpmbuild \
+    && dnf clean all
+
+VOLUME [ "/output" ]
+
+COPY ./build-srpm.sh /usr/bin/build-srpm.sh
+
+ARG BUILD_TIME
+ARG REVISION
+LABEL org.opencontainers.image.created="$BUILD_TIME"
+LABEL org.opencontainers.image.authors="W Anders <w@doubleu.codes>"
+LABEL org.opencontainers.image.url="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.documentation="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.revision="$REVISION"
+LABEL org.opencontainers.image.vendor="DoubleU Labs"
+LABEL org.opencontainers.image.licenses="MIT,BSD-2-Clause"
+LABEL org.opencontainers.image.title="build-srpm"
+LABEL org.opencontainers.image.description="Build RPM Source Packages (SRPMs) in Fedora"
+
+ENTRYPOINT [ "/usr/bin/build-srpm.sh" ]
