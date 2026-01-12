@@ -1,0 +1,72 @@
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+      container:
+        type: string
+        required: true
+    secrets:
+      QUAY_USERNAME:
+        required: true
+      QUAY_TOKEN:
+        required: true
+
+################################################################################
+
+jobs:
+  build_push:
+    name: Build and Push
+    runs-on: ${{ inputs.runner }}
+    steps:
+    #===========================================================================
+    - name: Checkout
+      uses: actions/checkout@v4
+    #===========================================================================
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    #===========================================================================
+    - name: Login to Quay
+      uses: docker/login-action@v3
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_TOKEN }}
+    #===========================================================================
+    - name: Build and Push by Digest
+      id: build
+      uses: docker/build-push-action@v6
+      with:
+        platforms: ${{ inputs.platform }}
+        file: ${{ inputs.container }}/Containerfile
+        context: ${{ inputs.container }}/
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
+          quay.io/${{ github.repository_owner }}/${{ inputs.container }}
+        outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+    #===========================================================================
+    - name: Export Digest and Sanitized Platform
+      id: digest
+      run: |
+        mkdir -p ${{ runner.temp }}/digests
+        digest="${{ steps.build.outputs.digest }}"
+        touch "${{ runner.temp }}/digests/${digest#sha256:}"
+        platform=${{ inputs.platform }}
+        echo "platform=${platform//\//-}" >> $GITHUB_OUTPUT
+    #===========================================================================
+    - name: Upload Digest
+      uses: actions/upload-artifact@v4
+      with:
+        name: digests-${{ steps.digest.outputs.platform }}
+        path: ${{ runner.temp }}/digests/*
+        if-no-files-found: error
+        retention-days: 1
