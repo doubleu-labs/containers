@@ -1,0 +1,113 @@
+
+on:
+  workflow_call:
+    inputs:
+      container:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+    secrets:
+      QUAY_USERNAME:
+        required: true
+      QUAY_TOKEN:
+        required: true
+      COSIGN_PASSWORD:
+        required: true
+      COSIGN_PRIVATE_KEY:
+        required: true
+
+jobs:
+
+################################################################################
+
+  merge_sign_platform_containers:
+    name: Merge and Sign Platform Containers
+    runs-on: ubuntu-latest
+    steps:
+    #===========================================================================
+    - name: Download Digests
+      uses: actions/download-artifact@v4
+      with:
+        path: ${{ runner.temp }}/digests
+        pattern: digests-*
+        merge-multiple: true
+    #===========================================================================
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    #===========================================================================
+    - name: Login to Quay
+      uses: docker/login-action@v3
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_TOKEN }}
+    #===========================================================================
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    #===========================================================================
+    - name: Setup Cosign
+      uses: sigstore/cosign-installer@v4.0.0
+      with:
+        cosign-release: v3.0.4
+    #===========================================================================
+    - name: Docker Metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
+          quay.io/${{ github.repository_owner }}/${{ inputs.container }}
+        tags: |
+          type=raw,latest
+          type=raw,${{ inputs.version }}
+    #===========================================================================
+    - name: Create Manifest List and Push
+      working-directory: ${{ runner.temp }}/digests
+      run: |
+        docker buildx imagetools create \
+          $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          $(printf 'ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@sha256:%s ' *) \
+          $(printf 'quay.io/${{ github.repository_owner }}/${{ inputs.container }}@sha256:%s ' *)
+    #===========================================================================
+    - name: Sign Manifest
+      env:
+        COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+        GHCR_USER: ${{ github.actor }}
+        GHCR_TOKEN: ${{ github.token }}
+        QUAY_USER: ${{ secrets.QUAY_USERNAME }}
+        QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+      run: |
+        cosign login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
+        cosign login quay.io -u "$QUAY_USER" -p "$QUAY_TOKEN"
+        images=""
+        for image in $(tr '\n' ' ' <<< "$DOCKER_METADATA_OUTPUT_TAGS"); do
+          images+="$(skopeo inspect --format='{{.Name}}@{{.Digest}}' docker://$image) "
+        done
+        images=$(
+          echo $images | tr ' ' '\n' | sed 's/\//:/' | \
+          sort -u -t':' -k1,1 -k3,3 | sed 's/:/\//' | tr '\n' ' ' | \
+          awk '{$1=$1};1'
+        )
+        for image in $(tr ' ' '\n' <<< "$images"); do
+          filename="$(sed 's/[./@:]/_/g' <<< $image)"
+          cosign generate $image > "${filename}.json"
+          cosign signing-config create > signing-config.json
+          cosign sign -d --yes --recursive \
+            --key=env://COSIGN_PRIVATE_KEY \
+            --bundle="${filename}.json" \
+            --upload=false \
+            --signing-config=signing-config.json \
+            "$image"
+          cosign attach signature -d \
+            --bundle="${filename}.json" \
+            "$image"
+        done
+
+################################################################################
