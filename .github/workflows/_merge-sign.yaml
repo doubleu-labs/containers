@@ -102,11 +102,7 @@ jobs:
           cosign sign -d --yes --recursive \
             --key=env://COSIGN_PRIVATE_KEY \
             --bundle="${filename}.json" \
-            --upload=false \
             --signing-config=signing-config.json \
-            "$image"
-          cosign attach signature -d \
-            --bundle="${filename}.json" \
             "$image"
         done
 
