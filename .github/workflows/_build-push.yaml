@@ -95,15 +95,12 @@ jobs:
     
     #===========================================================================
     - name: Generate GHCR Provenance
-      uses: philips-labs/slsa-provenance-action@v0.9.0
+      uses: actions/attest-build-provenance@v3
+      id: attest-ghcr
       with:
-        command: generate
-        subcommand: container
-        arguments: |
-          --repository="ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}" \
-          --tags="latest,${{ inputs.version }}" \
-          --digest="${{ steps.build.outputs.digest }}" \
-          --output-path="${{ runner.temp }}/provenance-ghcr-${{ steps.platform.outputs.platform }}.json"
+        subject-name: ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
+        subject-digest: ${{ steps.build.outputs.digest }}
+        push-to-registry: false
 
     #===========================================================================
     - name: Generate Quay SBOM
@@ -116,15 +113,12 @@ jobs:
 
     #===========================================================================
     - name: Generate Quay Provenance
-      uses: philips-labs/slsa-provenance-action@v0.9.0
+      uses: actions/attest-build-provenance@v3
+      id: attest-quay
       with:
-        command: generate
-        subcommand: container
-        arguments: |
-          --repository="quay.io/${{ github.repository_owner }}/${{ inputs.container }}" \
-          --tags="latest,${{ inputs.version }}" \
-          --digest="${{ steps.build.outputs.digest }}" \
-          --output-path="${{ runner.temp }}/provenance-quay-${{ steps.platform.outputs.platform }}.json"
+        subject-name: quay.io/${{ github.repository_owner }}/${{ inputs.container }}
+        subject-digest: ${{ steps.build.outputs.digest }}
+        push-to-registry: false
 
     #===========================================================================
     - name: Attest and Sign Platform Manifest with Cosign
@@ -137,15 +131,18 @@ jobs:
         QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
       run: |
         ghcr="ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        ghcr_prov="${{ steps.attest-ghcr.outputs.bundle-path }}"
         quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        quay_prov="${{ steps.attest-quay.outputs.bundle-path }}"
         cosign login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
         cosign login quay.io -u "$QUAY_USER" -p "$QUAY_TOKEN"
         for reg in ghcr quay; do
           cosign clean --force "${!reg}"
+          prov_file=${reg}_prov
           cosign attest --yes \
             --key=env://COSIGN_PRIVATE_KEY \
             --type=spdxjson \
-            --predicate="${{ runner.temp }}/sbom-${reg}-${{ steps.platform.outputs.platform }}.spdx.json" \
+            --predicate="${!prov_file}" \
             "${!reg}"
           cosign attest --yes \
             --key=env://COSIGN_PRIVATE_KEY \
