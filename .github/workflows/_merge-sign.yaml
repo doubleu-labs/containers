@@ -8,6 +8,9 @@ on:
       version:
         type: string
         required: true
+      alt-container-name:
+        type: string
+        required: false
     secrets:
       QUAY_USERNAME:
         required: true
@@ -67,8 +70,8 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: |
-          ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
-          quay.io/${{ github.repository_owner }}/${{ inputs.container }}
+          ghcr.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}
+          quay.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}
         tags: |
           type=raw,latest
           type=raw,${{ inputs.version }}
@@ -79,8 +82,8 @@ jobs:
       run: |
         docker buildx imagetools create \
           $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-          $(printf 'ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@sha256:%s ' *) \
-          $(printf 'quay.io/${{ github.repository_owner }}/${{ inputs.container }}@sha256:%s ' *)
+          $(printf 'ghcr.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}@sha256:%s ' *) \
+          $(printf 'quay.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}@sha256:%s ' *)
 
     #===========================================================================
     - name: Sign Manifest

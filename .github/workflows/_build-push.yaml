@@ -17,6 +17,9 @@ on:
       build-args:
         type: string
         required: false
+      alt-container-name:
+        type: string
+        required: false
     secrets:
       QUAY_USERNAME:
         required: true
@@ -75,8 +78,8 @@ jobs:
         context: ${{ inputs.container }}/
         build-args: ${{ inputs.build-args }}
         tags: |
-          ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
-          quay.io/${{ github.repository_owner }}/${{ inputs.container }}
+          ghcr.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}
+          quay.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}
         outputs: type=image,push-by-digest=true,name-canonical=true,push=true
         sbom: false
         provenance: false
@@ -92,11 +95,11 @@ jobs:
     - name: Export Image References
       id: images
       run: |
-        ghcr="ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}"
+        ghcr="ghcr.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}"
         echo "ghcr=${ghcr}" >> $GITHUB_OUTPUT
         ghcr_digest="${ghcr}@${{ steps.build.outputs.digest }}"
         echo "ghcr_digest=${ghcr_digest}" >> $GITHUB_OUTPUT
-        quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}"
+        quay="quay.io/${{ github.repository_owner }}/${{ inputs.alt-container-name || inputs.container }}"
         echo "quay=${quay}" >> $GITHUB_OUTPUT
         quay_digest="${quay}@${{ steps.build.outputs.digest }}"
         echo "quay_digest=${quay_digest}" >> $GITHUB_OUTPUT
