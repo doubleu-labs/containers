@@ -104,13 +104,9 @@ jobs:
           awk '{$1=$1};1'
         )
         for image in $(tr ' ' '\n' <<< "$images"); do
-          filename="$(sed 's/[./@:]/_/g' <<< $image)"
-          cosign generate $image > "${filename}.json"
-          cosign signing-config create > signing-config.json
-          cosign sign -d --yes --recursive \
+          cosign clean --force "$image"
+          cosign sign --yes --recursive \
             --key=env://COSIGN_PRIVATE_KEY \
-            --bundle="${filename}.json" \
-            --signing-config=signing-config.json \
             "$image"
         done
 
