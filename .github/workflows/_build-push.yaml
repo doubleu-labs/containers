@@ -113,8 +113,8 @@ jobs:
         quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
         cosign login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
         cosign login quay.io -u "$QUAY_USER" -p "$QUAY_TOKEN"
-        cosign clean "$ghcr"
-        cosign clean "$quay"
+        cosign clean --force "$ghcr"
+        cosign clean --force "$quay"
         cosign attest --yes \
           --key=env://COSIGN_PRIVATE_KEY \
           --type=spdxjson \
