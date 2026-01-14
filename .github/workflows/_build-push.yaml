@@ -136,16 +136,14 @@ jobs:
         subject-digest: ${{ steps.build.outputs.digest }}
 
     #===========================================================================
-    - name: Attest GHCR Provenance
+    - name: Attach GHCR Provenance
       env:
         COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
       run: |
         cosign login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
-        cosign attest --yes \
-          --key=env://COSIGN_PRIVATE_KEY \
-          --type=slsaprovenance \
-          --predicate="${{ steps.attest-ghcr.outputs.bundle-path }}" \
+        cosign attach attestation \
+          --attestation="${{ steps.attest-ghcr.outputs.bundle-path }}" \
           "${{ steps.images.outputs.ghcr_digest }}"
 
     #===========================================================================
@@ -179,16 +177,14 @@ jobs:
         subject-digest: ${{ steps.build.outputs.digest }}
 
     #===========================================================================
-    - name: Attest Quay Provenance
+    - name: Attach Quay Provenance
       env:
         COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
       run: |
         cosign login quay.io -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_TOKEN }}"
-        cosign attest --yes \
-          --key=env://COSIGN_PRIVATE_KEY \
-          --type=slsaprovenance \
-          --predicate="${{ steps.attest-quay.outputs.bundle-path }}" \
+        cosign attach attestation \
+          --attestation="${{ steps.attest-quay.outputs.bundle-path }}" \
           "${{ steps.images.outputs.quay_digest }}"
 
     #===========================================================================
