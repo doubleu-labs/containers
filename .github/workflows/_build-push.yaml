@@ -123,7 +123,7 @@ jobs:
           --type=spdxjson \
           --predicate="${{ runner.temp }}/sbom-quay-${{ steps.platform.outputs.platform }}.spdx.json" \
           "$quay"
-        cosign sign --yes --recursive \
+        cosign sign --yes \
           --key=env://COSIGN_PRIVATE_KEY \
           "$ghcr" "$quay"
 
