@@ -14,6 +14,9 @@ on:
       version:
         type: string
         required: true
+      build-args:
+        type: string
+        required: false
     secrets:
       QUAY_USERNAME:
         required: true
@@ -70,6 +73,7 @@ jobs:
         platforms: ${{ inputs.platform }}
         file: ${{ inputs.container }}/Containerfile
         context: ${{ inputs.container }}/
+        build-args: ${{ inputs.build-args }}
         tags: |
           ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
           quay.io/${{ github.repository_owner }}/${{ inputs.container }}
