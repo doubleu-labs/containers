@@ -61,6 +61,7 @@ jobs:
       platform: ${{ matrix.target.arch }}
       runner: ${{ matrix.target.runner }}
       container: ${{ needs.env.outputs.container }}
+      version: ${{ needs.env.outputs.version }}
 
 ################################################################################
 
