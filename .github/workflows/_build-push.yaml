@@ -72,7 +72,7 @@ jobs:
           quay.io/${{ github.repository_owner }}/${{ inputs.container }}
         outputs: type=image,push-by-digest=true,name-canonical=true,push=true
         sbom: false
-        provenance: mode=max
+        provenance: false
 
     #===========================================================================
     - name: Export Sanitized Platform
@@ -113,6 +113,8 @@ jobs:
         quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
         cosign login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
         cosign login quay.io -u "$QUAY_USER" -p "$QUAY_TOKEN"
+        cosign clean "$ghcr"
+        cosign clean "$quay"
         cosign attest --yes \
           --key=env://COSIGN_PRIVATE_KEY \
           --type=spdxjson \
