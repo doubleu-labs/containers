@@ -85,74 +85,124 @@ jobs:
         echo "platform=${platform//\//-}" >> $GITHUB_OUTPUT
 
     #===========================================================================
+    - name: Export Image References
+      id: images
+      run: |
+        ghcr="ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}"
+        echo "ghcr=${ghcr}" >> $GITHUB_OUTPUT
+        ghcr_digest="${ghcr}@${{ steps.build.outputs.digest }}"
+        echo "ghcr_digest=${ghcr_digest}" >> $GITHUB_OUTPUT
+        quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}"
+        echo "quay=${quay}" >> $GITHUB_OUTPUT
+        quay_digest="${quay}@${{ steps.build.outputs.digest }}"
+        echo "quay_digest=${quay_digest}" >> $GITHUB_OUTPUT
+
+    #===========================================================================
+    - name: Ensure Clean Image
+      run: |
+        cosign login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+        cosign login quay.io -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_TOKEN }}"
+        cosign clean --force "${{ steps.images.outputs.ghcr_digest }}"
+        cosign clean --force "${{ steps.images.outputs.quay_digest }}"
+
+    #===========================================================================
     - name: Generate GHCR SBOM
       uses: anchore/sbom-action@v0
       with:
-        image: "ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        image: "${{ steps.images.outputs.ghcr_digest }}"
         format: spdx-json
         output-file: ${{ runner.temp }}/sbom-ghcr-${{ steps.platform.outputs.platform }}.spdx.json
         upload-artifact: false
-    
+
+    #===========================================================================
+    - name: Attest GHCR SBOM
+      env:
+        COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      run: |
+        cosign login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+        cosign attest --yes \
+          --key=env://COSIGN_PRIVATE_KEY \
+          --type=spdxjson \
+          --predicate="${{ runner.temp }}/sbom-ghcr-${{ steps.platform.outputs.platform }}.spdx.json" \
+          "${{ steps.images.outputs.ghcr_digest }}"
+
     #===========================================================================
     - name: Generate GHCR Provenance
       uses: actions/attest-build-provenance@v3
       id: attest-ghcr
       with:
-        subject-name: ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
+        subject-name: ${{ steps.images.outputs.ghcr }}
         subject-digest: ${{ steps.build.outputs.digest }}
-        push-to-registry: false
+
+    #===========================================================================
+    - name: Attest GHCR Provenance
+      env:
+        COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      run: |
+        cosign login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+        cosign attest --yes \
+          --key=env://COSIGN_PRIVATE_KEY \
+          --type=slsaprovenance \
+          --predicate="${{ steps.attest-ghcr.outputs.bundle-path }}" \
+          "${{ steps.images.outputs.ghcr_digest }}"
 
     #===========================================================================
     - name: Generate Quay SBOM
       uses: anchore/sbom-action@v0
       with:
-        image: "quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        image: "${{ steps.images.outputs.quay_digest }}"
         format: spdx-json
         output-file: ${{ runner.temp }}/sbom-quay-${{ steps.platform.outputs.platform }}.spdx.json
         upload-artifact: false
+
+    #===========================================================================
+    - name: Attest Quay SBOM
+      env:
+        COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      run: |
+        cosign login quay.io -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_TOKEN }}"
+        cosign attest --yes \
+          --key=env://COSIGN_PRIVATE_KEY \
+          --type=spdxjson \
+          --predicate="${{ runner.temp }}/sbom-quay-${{ steps.platform.outputs.platform }}.spdx.json" \
+          "${{ steps.images.outputs.quay_digest }}"
 
     #===========================================================================
     - name: Generate Quay Provenance
       uses: actions/attest-build-provenance@v3
       id: attest-quay
       with:
-        subject-name: quay.io/${{ github.repository_owner }}/${{ inputs.container }}
+        subject-name: "${{ steps.images.outputs.quay }}"
         subject-digest: ${{ steps.build.outputs.digest }}
-        push-to-registry: false
+
+    #===========================================================================
+    - name: Attest Quay Provenance
+      env:
+        COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      run: |
+        cosign login quay.io -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_TOKEN }}"
+        cosign attest --yes \
+          --key=env://COSIGN_PRIVATE_KEY \
+          --type=slsaprovenance \
+          --predicate="${{ steps.attest-quay.outputs.bundle-path }}" \
+          "${{ steps.images.outputs.quay_digest }}"
 
     #===========================================================================
     - name: Attest and Sign Platform Manifest with Cosign
       env:
         COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-        GHCR_USER: ${{ github.actor }}
-        GHCR_TOKEN: ${{ github.token }}
-        QUAY_USER: ${{ secrets.QUAY_USERNAME }}
-        QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
       run: |
-        ghcr="ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
-        ghcr_prov="${{ steps.attest-ghcr.outputs.bundle-path }}"
-        quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
-        quay_prov="${{ steps.attest-quay.outputs.bundle-path }}"
-        cosign login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
-        cosign login quay.io -u "$QUAY_USER" -p "$QUAY_TOKEN"
-        for reg in ghcr quay; do
-          cosign clean --force "${!reg}"
-          prov_file=${reg}_prov
-          cosign attest --yes \
-            --key=env://COSIGN_PRIVATE_KEY \
-            --type=spdxjson \
-            --predicate="${!prov_file}" \
-            "${!reg}"
-          cosign attest --yes \
-            --key=env://COSIGN_PRIVATE_KEY \
-            --type=slsaprovenance \
-            --predicate="${{ runner.temp }}/provenance-${reg}-${{ steps.platform.outputs.platform }}.json" \
-            "${!reg}"
-        done
+        cosign login ghcr.io -u "${{ github.actor }}" -p "${{ github.token }}"
+        cosign login quay.io -u "${{ secrets.QUAY_USERNAME }}" -p "${{ secrets.QUAY_TOKEN }}"
         cosign sign --yes \
           --key=env://COSIGN_PRIVATE_KEY \
-          "$ghcr" "$quay"
+          "${{ steps.images.outputs.ghcr_digest }}" \
+          "${{ steps.images.outputs.quay_digest }}"
 
     #===========================================================================
     - name: Export Digest
