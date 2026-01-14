@@ -71,11 +71,36 @@ jobs:
           ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}
           quay.io/${{ github.repository_owner }}/${{ inputs.container }}
         outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-        sbom: true
+        sbom: false
         provenance: mode=max
 
     #===========================================================================
-    - name: Sign Platform Manifest with Cosign
+    - name: Export Sanitized Platform
+      id: platform
+      run: |
+        platform=${{ inputs.platform }}
+        echo "platform=${platform//\//-}" >> $GITHUB_OUTPUT
+
+    #===========================================================================
+    - name: Generate GHCR SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: "ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        format: spdx-json
+        output-file: ${{ runner.temp }}/sbom-ghcr-${{ steps.platform.outputs.platform }}.spdx.json
+        upload-artifact: false
+    
+    #===========================================================================
+    - name: Generate Quay SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: "quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        format: spdx-json
+        output-file: ${{ runner.temp }}/sbom-quay-${{ steps.platform.outputs.platform }}.spdx.json
+        upload-artifact: false
+
+    #===========================================================================
+    - name: Attest and Sign Platform Manifest with Cosign
       env:
         COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
@@ -84,28 +109,37 @@ jobs:
         QUAY_USER: ${{ secrets.QUAY_USERNAME }}
         QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
       run: |
+        ghcr="ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+        quay="quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
         cosign login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
         cosign login quay.io -u "$QUAY_USER" -p "$QUAY_TOKEN"
+        cosign attest --yes \
+          --key=env://COSIGN_PRIVATE_KEY \
+          --type=spdxjson \
+          --predicate="${{ runner.temp }}/sbom-ghcr-${{ steps.platform.outputs.platform }}.spdx.json" \
+          "$ghcr"
+        cosign attest --yes \
+          --key=env://COSIGN_PRIVATE_KEY \
+          --type=spdxjson \
+          --predicate="${{ runner.temp }}/sbom-quay-${{ steps.platform.outputs.platform }}.spdx.json" \
+          "$quay"
         cosign sign --yes --recursive \
           --key=env://COSIGN_PRIVATE_KEY \
-          "ghcr.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}" \
-          "quay.io/${{ github.repository_owner }}/${{ inputs.container }}@${{ steps.build.outputs.digest }}"
+          "$ghcr" "$quay"
 
     #===========================================================================
-    - name: Export Digest and Sanitized Platform
+    - name: Export Digest
       id: digest
       run: |
         mkdir -p ${{ runner.temp }}/digests
         digest="${{ steps.build.outputs.digest }}"
         touch "${{ runner.temp }}/digests/${digest#sha256:}"
-        platform=${{ inputs.platform }}
-        echo "platform=${platform//\//-}" >> $GITHUB_OUTPUT
 
     #===========================================================================
     - name: Upload Digest
       uses: actions/upload-artifact@v4
       with:
-        name: digests-${{ steps.digest.outputs.platform }}
+        name: digests-${{ steps.platform.outputs.platform }}
         path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
