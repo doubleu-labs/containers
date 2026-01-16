@@ -1,15 +1,28 @@
+
 ARG FEDORA_VERSION="43"
 ARG YKMAN_VERSION="5.8.0"
+ARG PCSC_LITE_VERSION="2.4.1"
 
 ################################################################################
-FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} as builder
+FROM quay.io/fedora/fedora:${FEDORA_VERSION} as builder
 
-RUN mkdir -p /scratch/run/pcscd
+RUN mkdir /builder /scratch
 
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
-        python3 \
+RUN dnf install \
+        --assumeyes \
+        --setopt=install_weak_deps=False \
+        --nodocs \
+        cmake \
+        doxygen \
+        flex \
+        gcc \
+        meson \
+        pod2man \
+        polkit-devel \
+        python3-devel \
         python3-pip \
-        python3-pyscard
+        systemd-devel \
+        systemd-udev
 
 RUN dnf install \
         --assumeyes \
@@ -17,12 +30,27 @@ RUN dnf install \
         --use-host-config \
         --no-docs \
         --setopt=install_weak_deps=False \
-        dbus-daemon \
-        pcsc-lite \
-        python3 \
-        python3-pyscard && \
+        bash \
+        python3 && \
     dnf clean all \
         --installroot=/scratch
+
+ARG PCSC_LITE_VERSION
+RUN curl -L -#  https://github.com/LudovicRousseau/PCSC/archive/refs/tags/${PCSC_LITE_VERSION}.tar.gz \
+    | tar -C /builder -zxv \
+    && cd /builder/PCSC-${PCSC_LITE_VERSION} \
+    && meson setup --prefix=/usr builddir \
+    && meson compile -C builddir pcsclite \
+    && meson install -C builddir --destdir=/scratch
+
+RUN  pip install \
+        --config-settings="--global-option=build_ext" \
+        --config-settings="--global-option=-L/scratch/usr/lib64/" \
+        --config-settings="--global-option=-I/scratch/usr/include/PCSC" \
+        --root=/scratch \
+        --root-user-action=ignore \
+        --no-warn-script-location \
+        pyscard
 
 ARG YKMAN_VERSION
 RUN pip install \
@@ -37,10 +65,6 @@ RUN useradd \
         --shell=/bin/bash \
         --prefix=/scratch \
         ykman
-
-RUN USER_ID=$(grep ykman /scratch/etc/passwd | cut -d':' -f3); \
-    GROUP_ID=$(grep ykman /scratch/etc/passwd | cut -d':' -f4); \
-    chown $USER_ID:$GROUP_ID /scratch/run/pcscd
 
 ################################################################################
 
@@ -59,12 +83,8 @@ LABEL com.yubico.yubikey-manager.version="$YKMAN_VERSION"
 
 COPY --from=builder /scratch /
 
-COPY ./entrypoint.sh /usr/local/bin/entrypoint.sh
-
 USER ykman
 
 WORKDIR /home/ykman
-
-ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
 
 CMD [ "/bin/bash" ]

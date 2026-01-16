@@ -1,164 +1,126 @@
+
 # YubiKey Manager (ykman)
 
-This container provides the `yubikey-manager` CLI without having to install or
-compile it.
+This container provides the `yubikey-manager` CLI tool so you don't have to
+compile or install it on your host system.
 
-There may still be some system preparations that you must do to comply with
-system security policies.
+This requires you to pass only the PC/SC socket to the container. Doing it this
+way prevents you from having to disable PC/SC on the host or applying the
+`PCSCLITE_IGNORE` label on the device, allowing the YubiKey to be used in
+multiple applications/containers.
 
-## SELinux
+This also prevents having to run PC/SC in the container itself, which could
+result in API errors. This *should* be mitigated since this container is built
+with PC/SC Lite `>=2.4.1`, which added API backward compatibility.
 
-If SELinux is installed and enforcing on the system intended to run this
-container, a policy module will need to be installed to allow containers to
-access USB devices.
+## Usage
 
-Here is the policy in two different formats. Pick whichever you're more
-comfortable installing.
-
-### Common Intermediate Languate (cil)
-
-```conf
-# container_t_usb_device_t.cil
-(typeattributeset cil_gen_require container_t)
-(typeattributeset cil_gen_require usb_device_t)
-(allow container_t usb_device_t (chr_file (getattr ioctl open read write)))
+```sh
+IMAGE=ghcr.io/doubleu-labs/ykman:latest
+# OR
+IMAGE=quay.io/doubleu-labs/ykman:latest
 ```
 
 ```sh
-sudo semodule -i container_t_usb_device_t.cil
+podman run --rm -it -v /run/pcsc:/run/pcsc --security-opt=label=disable $IMAGE
 ```
 
-## Type Enforcement (te)
+## Additional Configuration
 
-```conf
-# container_t_usb_device_t.te
-module container_t_usb_t 1.0;
+If you have PolKit enforcing, then you may need to configure a couple more
+things.
 
-require {
-    type container_t;
-    type usb_device_t;
-    class chr_file { getattr ioctl open read write };
-}
+Don't just blindly add this. Make sure you're actually receiveing denials before
+intalling this since it modifies your system's security posture.
 
-allow container_t usb_device_t:chr_file { getattr ioctl open read write };
+### PolKit
+
+Some distributions, such as RedHat Enterprise Linux (RHEL), include default
+`polkit` rules that deny all non-root users access to the `pcscd` daemon.
+
+Instead of globally allowing access, create a system group and add users to that
+to control access.
+
+```sh
+groupadd --system yubikey
 ```
 
 ```sh
-checkmodule -M -m -o container_t_usb_device_t.mod container_t_usb_device_t.te
+usermod -aG yubikey $USER
 ```
-
-```sh
-semodule_package -o container_t_usb_device_t.pp -m container_t_usb_device_t.mod
-```
-
-```sh
-sudo semodule -i container_t_usb_device_t.pp
-```
-
-## Udev
-
-While not strictly necessary, this `udev` rule creates a "well-known" symbolic
-link to an inserted Yubikey at `/dev/yubikey`. If the serial number is set to be
-visible over USB, then it will be appended (`/dev/yubikey0123456789`). This may
-be useful if multiple YubiKeys are needed on the same system.
-
-The `GROUP` assigned here should also be consistent with a group assigned to the
-user running the container.
-
-```conf
-# /etc/udev/rules.d/99-yubikey.rules
-SUBSYSTEM=="usb", \
-ATTRS{idVendor}=="1050", \
-ATTRS{idProduct}=="0401|0402|0403|0404|0405|0406|0407", \
-SYMLINK+="yubikey$attr{serial}", \
-GROUP="yubikey", \
-TAG+="uaccess"
-```
-
-If `pcscd` is running on the host system, then it will take exclusive control
-of the Yubikey, preventing `pcscd` in the container from communicating with it.
-If you cannot permanently disable `pcscd` on the host, then an additional Udev
-rule will be needed. This will require the serial number to be visible over USB,
-so use Yubikey Manager on either the host system with `pcscd` temporarily
-disabled, on a separate host where `pcscd` is not required and using this
-container, or on a separate host where `>=v5.8.0` can run directly.
-
-```sh
-ykman otp settings --serial-usb-visible
-```
-
-Once that is done, append the following to `/etc/udev/rules.d/99-yubikey.rules`,
-or whatever you named the `.rules` file:
-
-```conf
-SUBSYSTEM=="usb", \
-ATTRS{idVendor}=="1050", \
-ATTRS{idProduct}=="0401|0402|0403|0404|0405|0406|0407", \
-ATTRS{serial}=="0123456789", \
-ENV{PCSCLITE_IGNORE}="1"
-```
-
-Udev will read the serial number as 10 digits, even if `ykman` shows less, so
-you'll need to left-pad it with zeros (eg. `12345678` becomes `0012345678`).
-
-This rule disables `pcscd` on the host from communicating with that specific
-YubiKey.
-
-Now reload and trigger Udev.
-
-```sh
-sudo udevadm control --reload && sudo udevadm trigger
-```
-
-## Polkit
-
-Some distributions, such as Red Hat Enterprise Linux (RHEL), include default
-`polkit` rules that deny non-root users access to the `pcscd` daemon.
 
 ```js
 // /etc/polkit-1/rules.d/10-yubikey.rules
 polkit.addRule(function(action, subject) {
   if (action.id == "org.debian.pcsc-lite.access_pcsc") {
-    // Change USER to the user running the container
-    if (subject.user == "USER") {
+    if (subject.isInGroup("yubikey")) {
       return polkit.Result.YES;
     }
   }
   if (action.id == "org.debian.pcsc-lite.access_card") {
-    // This allows the USER access to any connected YubiKey
-    if (action.lookup("reader").startsWith("Yubico Yubikey")) {
+    if (action.lookup("reader").startsWith("Yubico YubiKey")) {
         return polkit.Result.YES;
-    }
-
-    // If the YubiKey exposes the serial number over USB and you want to
-    //  restrict the USER to a specific key, comment out the above, uncomment
-    //  the below block, and replace SERIAL with the YubiKey's serial number.
-
-    if (
-        action.lookup("reader").startsWith("Yubico YubiKey") &&
-        action.lookup("reader").includes("SERIAL")
-    ) {
-      return polkit.Result.YES;
     }
   }
 });
 ```
 
+The above rule allows anyone on the `yubikey` group to access YubiKey devices
+through the PC/SC daemon.
+
+Restart PolKit to apply:
+
 ```sh
 sudo systemctl restart polkit.service
 ```
 
-## Run
+Now, add some additional arguments to the `podman run` command:
 
-The YubiKey is accessed through `pcscd` using the user's `dbus` socket.
+```diff
+  podman run --rm -it \
+  -v /run/pcsc:/run/pcsc \
+  --security-opt=label=disable \
++ --group-add=$(getent group yubikey | cut -d':' -f3) \
++ --userns=keep-id \
+  $IMAGE
+```
+
+With some additional preparation, you could even further restrict this. In the
+container, note the YubiKey's serial number:
 
 ```sh
-podman run --rm -it \
---volume /run/user/$(id -u)/bus:/run/user/9000/bus \
---device=/dev/yubikey* \
---group-add=keep-groups \
-ghcr.io/doubleu-labs/ykman:latest \
-ykman --help
+ykamn list
+```
+
+```raw
+YubiKey 5 NFC (5.4.3) [OTP+FIDO+CCID] Serial: 12345678
+```
+
+Then modify the `/etc/polkit-1/rules.d/10-yubikey.rules` policy. Ensure that the
+serial number is 10-digits long. Left-pad with zeros as needed.
+
+```diff
+  // /etc/polkit-1/rules.d/10-yubikey.rules
+  polkit.addRule(function(action, subject) {
+    if (action.id == "org.debian.pcsc-lite.access_pcsc") {
+      if (subject.isInGroup("yubikey")) {
+        return polkit.Result.YES;
+      }
+    }
+    if (action.id == "org.debian.pcsc-lite.access_card") {
+-     if (action.lookup("reader").startsWith("Yubico YubiKey")) {
++     if (action.lookup("reader").startsWith("Yubico YubiKey") &&
++         action.lookup("reader").includes("0012345678")) {
+          return polkit.Result.YES;
+      }
+    }
+  });
+```
+
+Again, restart the PolKit service:
+
+```sh
+sudo systemctl restart polkit.service
 ```
 
 ## License
