@@ -1,0 +1,98 @@
+
+name: Build Smallstep CA
+on:
+  push:
+    paths:
+    - '.github/workflows/_build-push.yaml'
+    - '.github/workflows/_merge-sign.yaml'
+    - '.github/workflows/step-ca.yaml'
+    - 'step-ca/*'
+    - '!step-ca/README.md'
+  workflow_dispatch:
+env:
+  CONTAINER: step-ca
+
+################################################################################
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+jobs:
+
+################################################################################
+
+  env:
+    name: Setup Environment
+    runs-on: ubuntu-latest
+    outputs:
+      container: ${{ steps.env.outputs.container }}
+      version: ${{ steps.env.outputs.version }}
+    steps:
+    #===========================================================================
+    - uses: actions/checkout@v4
+    #===========================================================================
+    - id: env
+      run: |
+        echo "container=${{ env.CONTAINER }}" >> $GITHUB_OUTPUT
+        echo "version=$(cat ${{ env.CONTAINER }}/VERSION)" >> $GITHUB_OUTPUT
+
+################################################################################
+
+  build:
+    needs: env
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - arch: linux/amd64
+            runner: ubuntu-24.04
+          - arch: linux/arm64
+            runner: ubuntu-24.04-arm
+          - arch: linux/amd64
+            runner: ubuntu-24.04
+            build-args: "HSM=1"
+            alt-container-name: "step-ca-hsm"
+          - arch: linux/arm64
+            runner: ubuntu-24.04-arm
+            build-args: "HSM=1"
+            alt-container-name: "step-ca-hsm"
+    name: Build ${{ matrix.target.arch }} ${{ matrix.target.build-args || 'no-hsm' }}
+    uses: doubleu-labs/containers/.github/workflows/_build-push.yaml@master
+    secrets:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+      COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+      COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+    with:
+      platform: ${{ matrix.target.arch }}
+      runner: ${{ matrix.target.runner }}
+      container: ${{ needs.env.outputs.container }}
+      version: ${{ needs.env.outputs.version }}
+      build-args: ${{ matrix.target.build-args }}
+      alt-container-name: ${{ matrix.target.alt-container-name }}
+
+################################################################################
+
+  merge_sign_platform_containers:
+    needs: [ env, build ]
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - alt-container-name: ""
+          - alt-container-name: "step-ca-hsm"
+    name: Merge and Sign Platform Containers
+    uses: doubleu-labs/containers/.github/workflows/_merge-sign.yaml@master
+    secrets:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+      COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+      COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+    with:
+      container: ${{ needs.env.outputs.container }}
+      version: ${{ needs.env.outputs.version }}
+      alt-container-name: ${{ matrix.target.alt-container-name }}
+
+################################################################################

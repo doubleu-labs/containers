@@ -1,0 +1,153 @@
+ARG HSM
+ARG FEDORA_VERSION="43"
+ARG GO_VERSION="1.25.5"
+ARG PCSC_LITE_VERSION="2.4.1"
+ARG STEP_CA_VERSION="0.29.0"
+ARG STEP_CLI_VERSION="0.29.0"
+ARG STEP_KMS_PLUGIN_VERSION="0.16.0"
+
+#===============================================================================
+
+FROM quay.io/fedora/fedora:${FEDORA_VERSION} AS builder
+
+RUN mkdir /builder /scratch
+
+##############
+# PC/SC Lite #
+##############
+
+ARG HSM
+RUN test $HSM && { \
+        dnf install \
+        --assumeyes \
+        --setopt=install_weak_deps=False \
+        --no-docs \
+        cmake \
+        flex \
+        gcc \
+        meson \
+        pod2man \
+        polkit-devel \
+        systemd \
+        systemd-devel \
+        ; \
+    } || true
+
+ARG PCSC_LITE_VERSION
+RUN test $HSM && { \
+        curl -L -#  https://github.com/LudovicRousseau/PCSC/archive/refs/tags/${PCSC_LITE_VERSION}.tar.gz \
+        | tar -C /builder -zxv \
+        && cd /builder/PCSC-${PCSC_LITE_VERSION} \
+        && meson setup --prefix=/usr builddir \
+        && meson compile -C builddir pcsclite \
+        && meson install -C builddir --destdir=/scratch; \
+    } || true
+
+##########################
+# Smallstep CA and Tools #
+##########################
+
+RUN dnf install \
+        --assumeyes \
+        --setopt=install_weak_deps=False \
+        --no-docs \
+        make
+
+ARG BUILDARCH
+ARG GO_VERSION
+RUN curl -L -# https://go.dev/dl/go${GO_VERSION}.linux-${BUILDARCH}.tar.gz \
+    | tar -C /usr/local -zx
+ENV PATH=/usr/local/go/bin:$PATH
+
+ENV PKG_CONFIG_PATH="${HSM:+ /usr/lib64/pkgconfig:/usr/share/pkgconfig:/scratch/usr/lib64/pkgconfig}"
+ENV CGO_CFLAGS="${HSM:+ -O2 -g -I/scratch/usr/include -I/scratch/usr/include/PCSC}"
+ENV CGO_LDFLAGS="${HSM:+ -O2 -g -L/scratch/usr/lib64}"
+
+ARG STEP_CA_VERSION
+RUN curl -L -# https://github.com/smallstep/certificates/archive/refs/tags/v${STEP_CA_VERSION}.tar.gz \
+    | tar -C /builder -zx \
+    && cd /builder/certificates-${STEP_CA_VERSION} \
+    && make V=1 build ${HSM:+GO_ENVS="CGO_ENABLED=1"} \
+    && INSTALL_PREFIX=/scratch/usr/local/ make V=1 install ${HSM:+GO_ENVS="CGO_ENABLED=1"}
+
+ARG STEP_CLI_VERSION
+RUN curl -L -# https://github.com/smallstep/cli/archive/refs/tags/v${STEP_CLI_VERSION}.tar.gz \
+    | tar -C /builder -zx \
+    && cd /builder/cli-${STEP_CLI_VERSION} \
+    && make V=1 build \
+    && DESTDIR=/scratch/usr/local/bin make V=1 install
+
+ARG STEP_KMS_PLUGIN_VERSION
+RUN test $HSM && { \
+        curl -L -# https://github.com/smallstep/step-kms-plugin/archive/refs/tags/v${STEP_KMS_PLUGIN_VERSION}.tar.gz \
+        | tar -C /builder -zx \
+        && cd /builder/step-kms-plugin-${STEP_KMS_PLUGIN_VERSION} \
+        && VERSION=${STEP_KMS_PLUGIN_VERSION} make V=1 build \
+        && DESTDIR=/scratch INSTALL_PREFIX=/usr/local/ make V=1 install; \
+    } || true
+
+#######################
+# Setup Scratch Image #
+#######################
+
+RUN dnf install \
+        --assumeyes \
+        --installroot=/scratch \
+        --use-host-config \
+        --no-docs \
+        --setopt=install_weak_deps=False \
+        bash \
+        ca-certificates \
+        polkit-libs \
+    && dnf clean all \
+        --installroot=/scratch
+
+RUN useradd \
+        --user-group \
+        --create-home \
+        --shell=/bin/bash \
+        --prefix=/scratch \
+        --comment 'Smallstep' \
+        step
+
+RUN setcap 'cap_net_bind_service=+ep' /scratch/usr/local/bin/step-ca
+
+#===============================================================================
+
+FROM scratch
+
+ARG HSM
+ARG STEP_CA_VERSION
+ARG STEP_CLI_VERSION
+ARG STEP_KMS_PLUGIN_VERSION
+LABEL org.opencontainers.image.authors="W Anders <w@doubleu.codes>"
+LABEL org.opencontainers.image.url="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.documentation="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.vendor="DoubleU Labs"
+LABEL org.opencontainers.image.licenses="MIT,MPL-2.0"
+LABEL org.opencontainers.image.title="step-ca${HSM:+-hsm}"
+LABEL org.opencontainers.image.description="DoubleU Labs Smallstep CA${HSM:+ with HSM support}"
+LABEL com.smallstep.certificates.version="v${STEP_CA_VERSION}"
+LABEL com.smallstep.cli.version="v${STEP_CLI_VERSION}"
+LABEL com.smallstep.kms-plugin.version="v${HSM:+STEP_KMS_PLUGIN_VERSION}"
+
+COPY --from=builder /scratch /
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+WORKDIR /home/step
+
+VOLUME /home/step
+
+USER step
+
+EXPOSE 9000/tcp
+
+ENTRYPOINT [ "/bin/bash", "/usr/local/bin/entrypoint.sh" ]
+
+CMD [ \
+        "/usr/local/bin/step-ca", \
+        "--password-file", "/home/step/secrets/password", \
+        "/home/step/config/ca.json" \
+    ]
