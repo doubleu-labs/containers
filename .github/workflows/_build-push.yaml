@@ -216,17 +216,10 @@ jobs:
         touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
     #===========================================================================
-    - name: Generate Random Artifact Suffix
-      id: artifact-suffix
-      run: |
-        suffix=$(date +%s%6N)
-        echo "suffix=${suffix}" >> $GITHUB_OUTPUT
-
-    #===========================================================================
     - name: Upload Digest
       uses: actions/upload-artifact@v4
       with:
-        name: digests-${{ steps.platform.outputs.platform }}-${{ steps.artifact-suffix.outputs.suffix }}
+        name: digests-${{ inputs.alt-container-name || inputs.container }}-${{ steps.platform.outputs.platform }}
         path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
