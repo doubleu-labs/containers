@@ -219,7 +219,7 @@ jobs:
     - name: Generate Random Artifact Suffix
       id: artifact-suffix
       run: |
-        suffix=$(< /dev/urandom | tr -dc '[[:alnum:]]' | head -c8)
+        suffix=$(date +%s%6N)
         echo "suffix=${suffix}" >> $GITHUB_OUTPUT
 
     #===========================================================================
