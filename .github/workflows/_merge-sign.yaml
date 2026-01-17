@@ -35,7 +35,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: ${{ runner.temp }}/digests
-        pattern: digests-${{ inputs.alt-container-name || inputs.container }}-*
+        pattern: digests_${{ inputs.alt-container-name || inputs.container }}_*
         merge-multiple: true
 
     #===========================================================================
