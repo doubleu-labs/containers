@@ -1,5 +1,5 @@
 ARG FEDORA_VERSION=42
-ARG DNSMASQ_VERSION="2.91"
+ARG DNSMASQ_VERSION="2.92"
 
 ################################################################################
 
