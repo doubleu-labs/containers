@@ -1,4 +1,5 @@
-ARG FEDORA_VERSION=42
+
+ARG FEDORA_VERSION="43"
 ARG DNSMASQ_VERSION="2.92"
 
 ################################################################################
@@ -7,18 +8,24 @@ FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
 
 RUN mkdir -p /builder /scratch/var/lib/misc
 
-RUN dnf install -y --setopt=install_weak_deps=False --no-docs \
+RUN dnf install \
+    --assumeyes \
+    --setopt=install_weak_deps=False \
+    --nodocs \
     gcc \
-    gettext \
-    make \
-    pkgconf-pkg-config
+    make 
 
 ARG FEDORA_VERSION
-RUN dnf --installroot=/scratch --releasever=${FEDORA_VERSION} \
-    install -y --setopt=install_weak_deps=False --no-docs --use-host-config \
-    coreutils \
-    glibc \
-    && dnf --installroot=/scratch clean all
+RUN dnf install \
+        --assumeyes \
+        --installroot=/scratch \
+        --use-host-config \
+        --no-docs \
+        --setopt=install_weak_deps=False \
+        coreutils \
+        glibc && \
+    dnf clean all \
+        --installroot=/scratch
 
 ARG DNSMASQ_VERSION
 RUN curl -L -o - https://dnsmasq.org/dnsmasq-${DNSMASQ_VERSION}.tar.xz | \
