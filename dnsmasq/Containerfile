@@ -4,7 +4,7 @@ ARG DNSMASQ_VERSION="2.92"
 
 ################################################################################
 
-FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION} AS builder
+FROM quay.io/fedora/fedora:${FEDORA_VERSION} AS builder
 
 RUN mkdir -p /builder /scratch/var/lib/misc
 
