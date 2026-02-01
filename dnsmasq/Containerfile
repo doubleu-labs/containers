@@ -2,20 +2,36 @@
 ARG FEDORA_VERSION="43"
 ARG DNSMASQ_VERSION="2.92"
 
-################################################################################
+#===============================================================================
 
 FROM quay.io/fedora/fedora:${FEDORA_VERSION} AS builder
 
-RUN mkdir -p /builder /scratch/var/lib/misc
+RUN mkdir -p /builder /scratch
+
+###########
+# dnsmasq #
+###########
 
 RUN dnf install \
-    --assumeyes \
-    --setopt=install_weak_deps=False \
-    --nodocs \
-    gcc \
-    make 
+        --assumeyes \
+        --setopt=install_weak_deps=False \
+        --nodocs \
+        gcc \
+        make
 
-ARG FEDORA_VERSION
+ARG BUILD_COPTS
+ARG DNSMASQ_VERSION
+RUN curl -# -L https://dnsmasq.org/dnsmasq-${DNSMASQ_VERSION}.tar.xz \
+    | tar -C /builder -Jxv \
+    && cd /builder/dnsmasq-${DNSMASQ_VERSION} \
+    && make install DESTDIR=/scratch COPTS="${BUILD_COPTS}" \
+    && setcap "cap_net_bind_service,cap_net_admin,cap_net_raw=+ep" \
+        /scratch/usr/local/sbin/dnsmasq
+
+#######################
+# Setup Scratch Image #
+#######################
+
 RUN dnf install \
         --assumeyes \
         --installroot=/scratch \
@@ -27,38 +43,28 @@ RUN dnf install \
     dnf clean all \
         --installroot=/scratch
 
-ARG DNSMASQ_VERSION
-RUN curl -L -o - https://dnsmasq.org/dnsmasq-${DNSMASQ_VERSION}.tar.xz | \
-    tar Jxv -C /builder
-
-WORKDIR /builder/dnsmasq-${DNSMASQ_VERSION}
-
-ARG BUILD_COPTS
-RUN make install DESTDIR="/scratch" COPTS="${BUILD_COPTS}"
-
-RUN setcap "cap_net_bind_service,cap_net_admin,cap_net_raw=+ep" \
-    /scratch/usr/local/sbin/dnsmasq
-
-RUN useradd dnsmasq --no-log-init -U -M -s /sbin/nologin
-
-RUN grep -E "^dnsmasq:.*" /etc/passwd >> /scratch/etc/passwd && \
-    grep -E "^dnsmasq:.*" /etc/group >> /scratch/etc/group && \
-    grep -E "^dnsmasq:.*" /etc/shadow >> /scratch/etc/shadow
+RUN useradd \
+        --user-group \
+        --create-home \
+        --shell=/bin/bash \
+        --prefix=/scratch \
+        --comment='dnsmasq' \
+        dnsmasq
 
 RUN chgrp dnsmasq /scratch/var/lib/misc/ && chmod 775 /scratch/var/lib/misc/
 
-################################################################################
+#===============================================================================
 
 FROM scratch
 
 ARG DNSMASQ_VERSION
 ARG IMG_TITLE
-LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers" \
-    org.opencontainers.image.authors="W Anders <w@doubleu.codes>" \
-    org.opencontainers.image.title="${IMG_TITLE}" \
-    org.opencontainers.image.description="DoubleU Labs dnsmasq" \
-    org.opencontainers.image.license="MIT" \
-    org.dnsmasq.version="${DNSMASQ_VERSION}"
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.authors="W Anders <w@doubleu.codes>"
+LABEL org.opencontainers.image.title="${IMG_TITLE}"
+LABEL org.opencontainers.image.description="DoubleU Labs dnsmasq"
+LABEL org.opencontainers.image.license="MIT"
+LABEL org.dnsmasq.version="${DNSMASQ_VERSION}"
 
 COPY --from=builder /scratch /
 
