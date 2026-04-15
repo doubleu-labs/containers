@@ -1,0 +1,163 @@
+ARG FEDORA_VERSION="43"
+ARG BIND_VERSION="9.20.22"
+ARG BIND_UID="53"
+ARG BIND_GID="53"
+
+################################################################################
+FROM quay.io/fedora/fedora:${FEDORA_VERSION} AS builder
+
+RUN mkdir /builder /scratch
+
+################
+# Compile Bind #
+################
+
+RUN dnf install \
+        --assumeyes \
+        --setopt=install_weak_deps=False \
+        --nodocs \
+        fstrm-devel \
+        gcc \
+        jemalloc-devel \
+        json-c-devel \
+        krb5-devel \
+        libcap-devel \
+        libidn2-devel \
+        libmaxminddb-devel \
+        libnghttp2-devel \
+        libuv-devel \
+        libxml2-devel \
+        lmdb-devel \
+        make \
+        openssl-devel \
+        protobuf-c-devel \
+        readline-devel \
+        systemtap-sdt-devel \
+        systemtap-sdt-dtrace \
+        userspace-rcu-devel
+
+ARG BIND_VERSION
+RUN curl -# -L https://downloads.isc.org/isc/bind9/${BIND_VERSION}/bind-${BIND_VERSION}.tar.xz \
+    | tar -C /builder -Jxv \
+    && cd /builder/bind-${BIND_VERSION} \
+    && ./configure \
+        --disable-static \
+        --enable-auto-validation \
+        --enable-dnsrps \
+        --enable-dnsrps-dl \
+        --enable-dnstap \
+        --enable-geoip \
+        --enable-leak-detection \
+        --enable-querytrace \
+        --enable-shared \
+        --enable-singletrace \
+        --enable-tracing \
+        --enable-year2038 \
+        --localstatedir=/ \
+        --prefix=/usr \
+        --sysconfdir=/etc/bind \
+        --with-gssapi \
+        --with-json-c \
+        --with-libidn2 \
+        --with-libnghttp2 \
+        --with-libxml2 \
+        --with-lmdb \
+        --with-readline=yes \
+        --with-zlib \
+    && make -j \
+    && make install DESTDIR=/scratch 
+
+#######################
+# Setup Scratch Image #
+#######################
+
+RUN dnf install \
+        --assumeyes \
+        --installroot=/scratch \
+        --use-host-config \
+        --no-docs \
+        --setopt=install_weak_deps=False \
+        fstrm \
+        glibc \
+        jemalloc \
+        json-c \
+        krb5-libs \
+        libcap \
+        libgcc \
+        libmaxminddb \
+        libnghttp2 \
+        libuv \
+        libxml2 \
+        lmdb-libs \
+        openssl-libs \
+        protobuf-c \
+        userspace-rcu \
+        xz-libs \
+        zlib-ng-compat \
+    && dnf clean all \
+        --installroot=/scratch
+
+ARG BIND_GID
+ARG BIND_UID
+RUN groupadd \
+        --gid=${BIND_GID} \
+        --system \
+        --prefix=/scratch \
+        bind \
+    && useradd \
+        --comment="BIND9" \
+        --gid=${BIND_GID} \
+        --create-home \
+        --system \
+        --shell=/bin/bash \
+        --prefix=/scratch \
+        --uid=${BIND_UID} \
+        bind
+
+# Create configuration directory
+RUN mkdir -p /scratch/etc/bind \
+    && chown root:${BIND_GID} /scratch/etc/bind \
+    && chmod 755 /scratch/etc/bind
+
+# Create working directory
+RUN mkdir -p /scratch/var/cache/bind \
+    && chown ${BIND_UID}:${BIND_GID} /scratch/var/cache/bind \
+    && chmod 755 /scratch/var/cache/bind
+
+# Create secondary zone directory
+RUN mkdir -p /scratch/var/lib/bind \
+    && chown ${BIND_UID}:${BIND_GID} /scratch/var/lib/bind \
+    && chmod 755 /scratch/var/lib/bind
+
+# Create log directory
+RUN mkdir -p /scratch/var/log/bind \
+    && chown ${BIND_UID}:${BIND_GID} /scratch/var/log/bind \
+    && chmod 755 /scratch/var/log/bind
+
+# Create PID directory
+RUN mkdir -p /scratch/run/named \
+    && chown ${BIND_UID}:${BIND_GID} /scratch/run/named \
+    && chmod 755 /scratch/run/named
+
+################################################################################
+FROM scratch
+
+LABEL org.opencontainers.image.source="https://github.com/doubleu-labs/containers"
+LABEL org.opencontainers.image.authors="W Anders <w@doubleu.codes>"
+LABEL org.opencontainers.image.title="bind"
+LABEL org.opencontainers.image.description="ISC Bind DNS Server"
+LABEL org.opencontainers.image.license="MIT AND MPL-2.0"
+ARG BIND_VERSION
+LABEL org.isc.bind.version="${BIND_VERSION}"
+
+COPY --from=builder /scratch /
+
+COPY named.conf /etc/bind
+
+VOLUME [ "/etc/bind", "/var/cache/bind", "/var/lib/bind", "/var/log" ]
+
+EXPOSE 53/udp 53/tcp 443/tcp 853/tcp 953/tcp
+
+ENTRYPOINT [ "/usr/sbin/named", "-u", "bind" ]
+
+CMD [ "-g", "-c", "/etc/bind/named.conf", "-L", "/var/log/bind/default.log" ]
