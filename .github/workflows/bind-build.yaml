@@ -5,7 +5,7 @@ on:
     paths:
     - '.github/workflows/_build-push.yaml'
     - '.github/workflows/_merge-sign.yaml'
-    - '.github/workflows/build-srpm-build.yaml'
+    - '.github/workflows/bind-build.yaml'
     - 'bind/*'
     - '!bind/README.md'
   workflow_dispatch:
